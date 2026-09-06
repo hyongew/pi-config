@@ -1,0 +1,11 @@
+{
+  "lastChangelogVersion": "0.85.1",
+  "theme": "dark",
+  "packages": [
+    "git:github.com/huggingface/pi-llama"
+  ],
+  "showHardwareCursor": false,
+  "doubleEscapeAction": "tree",
+  "defaultThinkingLevel": "max",
+  "defaultProvider": "llama-cpp"
+}

@@ -1,0 +1,25 @@
+# Keep the GitHub repository limited to the portable Pi configuration.
+/*
+!.gitignore
+!skills/
+!skills/**
+!extensions/
+!extensions/**
+!APPEND_SYSTEM.md
+!keybindings.json
+!package.json
+!package-lock.json
+!settings.json
+!ts-config.json
+!README.md
+
+# Never commit generated Python bytecode, including inside allowed directories.
+**/__pycache__/
+**/*.pyc
+
+# Dependencies are restored from package-lock.json rather than committed.
+**/node_modules/
+
+# Browser state contains cookies, local storage, and other machine-local data.
+extensions/browser/.profile/
+extensions/qwen-think/config.json

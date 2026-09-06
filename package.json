@@ -1,0 +1,13 @@
+{
+  "dependencies": {
+    "@mozilla/readability": "^0.5.0",
+    "linkedom": "^0.16.0",
+    "playwright-core": "^1.49.0",
+    "shell-quote": "^1.8.3",
+    "turndown": "^7.2.0",
+    "unpdf": "^1.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

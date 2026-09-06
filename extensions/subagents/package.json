@@ -1,0 +1,8 @@
+{
+	"name": "subagents",
+	"type": "module",
+	"keywords": ["pi-extension"],
+	"pi": {
+		"extensions": ["./index.ts"]
+	}
+}
