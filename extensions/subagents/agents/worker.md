@@ -15,6 +15,7 @@ Work autonomously to complete the assigned task. When finished, write your final
 - Make targeted edits, not wholesale rewrites.
 - Use `safe-bash`, when available, for allowlisted read-only inspection commands. If it is unavailable, use `read`, `grep`, `find`, and `ls` for inspection. Use `read`, `write`, and `edit` for file work.
 - If something fails, diagnose and fix it.
+- If a task asks you to spawn an agent not listed in the delegation section, do not retry that agent. Complete the work yourself when possible, or state the limitation clearly in your final summary.
 - Your final assistant message should summarize what you did and what changed.
 
 ## Delegation

@@ -294,14 +294,47 @@ function permittedAgents(): AgentConfig[] {
 	return allowed.length === 0 ? agents : agents.filter((agent) => allowed.includes(agent.name));
 }
 
+function describeAgents(availableAgents: AgentConfig[]): string {
+	if (availableAgents.length === 0) return "None are available in this session.";
+	return availableAgents
+		.map((agent) => {
+			const tools = agent.tools.length > 0 ? `tools: ${agent.tools.join(", ")}` : "no tools";
+			const delegation = agent.subagentAgents.length > 0
+				? `; can delegate to: ${agent.subagentAgents.join(", ")}`
+				: "";
+			return `${agent.name} - ${agent.description || "No description provided"} (${tools}${delegation})`;
+		})
+		.join("; ");
+}
+
+function childAgentInstructions(agent: AgentConfig): string {
+	if (agent.subagentAgents.length === 0) {
+		return `You are the ${agent.name} subagent. You cannot spawn child agents. Do not call the subagent tool or retry an unavailable agent name. Complete the task yourself and report any limitation to the parent.`;
+	}
+	return `You are the ${agent.name} subagent. You may spawn only these child agents: ${agent.subagentAgents.join(", ")}. Never try to spawn any other agent, including another ${agent.name}. If the task asks for an unavailable child, do not retry it: either complete that part yourself or tell the parent that the requested delegation is unavailable.`;
+}
+
+function agentNameSchema(availableAgents: AgentConfig[], description: string) {
+	const names = availableAgents.map((agent) => agent.name);
+	if (names.length === 0) return Type.String({ description });
+	if (names.length === 1) return Type.Literal(names[0], { description });
+	return Type.Union(names.map((name) => Type.Literal(name)), { description });
+}
+
 function getCurrentLocalModel(): string {
 	const modelsPath = path.join(PI_DIR, "models.json");
 	try {
 		const config = JSON.parse(fs.readFileSync(modelsPath, "utf-8")) as {
-			providers?: { llamacpp?: { models?: Array<{ id?: string }> } };
+			providers?: Record<string, { models?: Array<{ id?: string }> }>;
 		};
-		const id = config.providers?.llamacpp?.models?.[0]?.id;
-		if (id) return `llama-cpp/${id}`;
+		for (const [provider, providerConfig] of Object.entries(config.providers ?? {})) {
+			// Keep the configured provider spelling. Pi model references are exact
+			// provider/modelId pairs; e.g. this setup uses "llamacpp", not
+			// "llama-cpp".
+			if (!["llamacpp", "llama-cpp", "llama.cpp"].includes(provider.toLowerCase())) continue;
+			const id = providerConfig.models?.find((model) => typeof model.id === "string" && model.id.trim())?.id?.trim();
+			if (id) return `${provider}/${id}`;
+		}
 	} catch {
 		// Report a useful error at spawn time below.
 	}
@@ -423,7 +456,7 @@ async function buildPiArgs(
 	const unavailableNotice = unavailableTools.length > 0
 		? `\n\nThe following requested tools are unavailable in this session: ${unavailableTools.join(", ")}. Continue with the tools that are available; do not call unavailable tools.`
 		: "";
-	args.push("--append-system-prompt", agent.systemPrompt + unavailableNotice);
+	args.push("--append-system-prompt", `${childAgentInstructions(agent)}\n\n${agent.systemPrompt}${unavailableNotice}`);
 
 	// Handle long tasks by writing to file
 	const TASK_LIMIT = 8000;
@@ -695,8 +728,7 @@ function modelPattern(model: unknown): string | undefined {
 	if (!model || typeof model !== "object") return undefined;
 	const candidate = model as { provider?: unknown; id?: unknown };
 	if (typeof candidate.provider !== "string" || typeof candidate.id !== "string") return undefined;
-	const provider = candidate.provider === "llamacpp" ? "llama-cpp" : candidate.provider;
-	return `${provider}/${candidate.id}`;
+	return `${candidate.provider}/${candidate.id}`;
 }
 
 function failedResult(agent: AgentConfig, task: string, error: unknown): AgentResult {
@@ -936,6 +968,10 @@ export default function (pi: ExtensionAPI) {
 		? Math.min(MAX_CONCURRENCY, Math.max(1, Math.trunc(requestedConcurrency as number)))
 		: DEFAULT_MAX_CONCURRENCY;
 	agents = loadAgents();
+	const availableAgents = permittedAgents();
+	const agentCatalog = describeAgents(availableAgents);
+	const agentFieldDescription = `Agent to invoke. Available agents: ${agentCatalog}`;
+	const agentName = agentNameSchema(availableAgents, agentFieldDescription);
 
 	pi.registerCommand("subagents", {
 		description: "List, inspect, and continue subagent runs",
@@ -1023,24 +1059,24 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
-		description:
-			"Run a subagent to complete a task. Subagents have NO context from the current conversation — include all necessary context in the task description.",
+		description: `Run one or more subagents. Use agent + task for one task, or tasks[] for independent tasks in parallel. Subagents have NO context from the current conversation, so include all necessary context in each task. Available agents: ${agentCatalog}`,
 		promptSnippet: "Run subagents for delegated tasks",
 		promptGuidelines: [
 			"Parallel tool calls are your primary parallelism mechanism — put multiple independent read/fetch/search calls in one function_calls block. Don't use subagents to parallelize simple I/O.",
-			"Use subagent to delegate *reasoning and decisions*: codebase exploration (scout), web research (researcher), or isolated code changes (worker)",
+			`Choose an agent from this live catalog: ${agentCatalog}`,
+			"Use scout for read-only codebase exploration, researcher for web research, reviewer for read-only review, and worker for code changes when those agents are available.",
 			"For multiple independent subagent tasks, use parallel mode with tasks[] array",
 			"Subagents have NO context from the current conversation — include ALL necessary context in the task description",
 		],
 		parameters: Type.Object({
 			agent: Type.Optional(
-				Type.String({ description: "Name of the agent to invoke (SINGLE mode)" }),
+				agentName,
 			),
 			task: Type.Optional(Type.String({ description: "Task description (SINGLE mode)" })),
 			tasks: Type.Optional(
 				Type.Array(
 					Type.Object({
-						agent: Type.String({ description: "Name of the agent to invoke" }),
+						agent: agentNameSchema(availableAgents, agentFieldDescription),
 						task: Type.String({ description: "Task description" }),
 						cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
 					}),
@@ -1066,7 +1102,7 @@ export default function (pi: ExtensionAPI) {
 				const available = availableAgents.map((a) => a.name).join(", ") || "none";
 				for (const t of taskList) {
 					if (!availableAgents.find((a) => a.name === t.agent)) {
-						throw new Error(`Unknown agent: ${t.agent}. Available agents: ${available}`);
+						throw new Error(`Unknown agent: ${t.agent}. Available agents: ${available}. Do not retry this unavailable agent; complete the task yourself or choose one of the listed agents.`);
 					}
 				}
 				const resolvedAgents = new Map(
@@ -1147,7 +1183,7 @@ export default function (pi: ExtensionAPI) {
 				const agent = availableAgents.find((a) => a.name === params.agent);
 				if (!agent) {
 					const available = availableAgents.map((a) => a.name).join(", ") || "none";
-					throw new Error(`Unknown agent: ${params.agent}. Available agents: ${available}`);
+					throw new Error(`Unknown agent: ${params.agent}. Available agents: ${available}. Do not retry this unavailable agent; complete the task yourself or choose one of the listed agents.`);
 				}
 				const runAgent = resolveAgentModel(agent, ctx.modelRegistry);
 
