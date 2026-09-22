@@ -154,6 +154,12 @@ function withUiLock<T>(fn: () => Promise<T>): Promise<T> {
 	return sharedUiLock.withLock(fn);
 }
 
+function playQuestionNotificationSound(ctx: ExtensionContext): void {
+	if (ctx.mode === "tui") {
+		process.stdout.write("\u0007");
+	}
+}
+
 function formatAnswerForModel(answer: AskAnswer): string {
 	switch (answer.type) {
 		case "text":
@@ -630,6 +636,7 @@ export default function askQuestion(pi: ExtensionAPI) {
 				if (signal?.aborted) {
 					return cancelledResult(params.question, mode, context);
 				}
+				playQuestionNotificationSound(ctx);
 
 				if (mode === "text") {
 					const editorTitle = context ? `${params.question}\n\n${context}` : params.question;
@@ -659,16 +666,7 @@ export default function askQuestion(pi: ExtensionAPI) {
 		},
 
 		renderCall(args, theme) {
-			const options = normalizeOptions(args.options as Array<{ label: string; value?: string; description?: string }> | undefined);
-			let text = theme.fg("toolTitle", theme.bold("ask-question ")) + theme.fg("muted", args.question);
-			if (args.multiSelect) {
-				text += theme.fg("dim", " [multi-select]");
-			}
-			if (options.length > 0) {
-				const labels = [...options.map((option) => option.label), getOtherLabel(options)].join(", ");
-				text += `\n${theme.fg("dim", `  Options: ${labels}`)}`;
-			}
-			return new Text(text, 0, 0);
+			return new Text(theme.fg("muted", args.question), 0, 0);
 		},
 
 		renderResult(result, _options, theme) {
