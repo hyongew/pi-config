@@ -28,6 +28,7 @@ Invocation labels:
 | Skill              | Called by  | Purpose                                                                                                             |
 |--------------------|------------|---------------------------------------------------------------------------------------------------------------------|
 | analyse-sessions   | User       | Retrieves local Pi session history for costs, prompts, transcript searches, and bounded session views.              |
+| pdf-reader         | Both       | Reads and analyzes PDFs.                                                                                            |
 | web-debug          | Both       | Guides live frontend debugging and verification using browser runtime, storage, console, network, and DOM evidence. |
 | youtube-transcript | Both       | Extracts YouTube captions or researches YouTube topics using local transcripts and selective web search.            |
 | grill-me           | User       | Relentlessly interviews the user about any objective, idea, concept, decision, project, or situation.               |
