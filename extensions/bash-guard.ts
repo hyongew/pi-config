@@ -1,7 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, isToolCallEventType } from "@earendil-works/pi-coding-agent";
-import type { SelectItem } from "@earendil-works/pi-tui";
-import { Container, Key, matchesKey, SelectList, Text } from "@earendil-works/pi-tui";
+import { Container, Key, matchesKey, Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { parse as shellParse } from "shell-quote";
 
 type Severity = "catastrophic" | "high" | "medium";
@@ -539,47 +538,110 @@ function withUiLock<T>(fn: () => Promise<T>): Promise<T> {
 	return sharedUiLock.withLock(fn);
 }
 
+function playQuestionNotificationSound(ctx: ExtensionContext): void {
+	if (ctx.mode === "tui") {
+		process.stdout.write("\u0007");
+	}
+}
+
+function addWrapped(lines: string[], text: string, width: number, indent = ""): void {
+	const contentWidth = Math.max(1, width - indent.length);
+	for (const line of wrapTextWithAnsi(text, contentWidth)) {
+		lines.push(truncateToWidth(`${indent}${line}`, width));
+	}
+}
+
 async function promptRisk(ctx: ExtensionContext, command: string, risk: Risk): Promise<"yes" | "no"> {
 	if (!ctx.hasUI) return "no";
 
 	const critical = risk.severity === "catastrophic";
-	const reasonsText = risk.reasons.map((reason) => `• ${reason}`).join("\n");
-	const body = critical
-		? `This command may cause irreversible damage.\n\n${reasonsText}\n\nCommand:\n${command}`
-		: `Command flagged as HIGH risk:\n\n${reasonsText}\n\nCommand:\n${command}`;
-	const items: SelectItem[] = [
-		{ value: "yes", label: "Yes", description: "Run the command" },
-		{ value: "no", label: "No", description: "Skip the command and continue" },
+	const items = [
+		{ value: "yes" as const, label: "Yes", description: "Run the command" },
+		{ value: "no" as const, label: "No", description: "Skip the command and continue" },
 	];
 
+	playQuestionNotificationSound(ctx);
 	const choice = await ctx.ui.custom<"yes" | "no">((tui: any, theme: any, _kb: any, done: (value: "yes" | "no") => void) => {
-		const container = new Container();
 		const color = critical ? "error" : "warning";
-		container.addChild(new DynamicBorder((s: string) => theme.fg(color, s)));
-		container.addChild(new Text(theme.fg(color, theme.bold(critical ? "Critical bash command" : "High-risk bash command")), 1, 0));
-		container.addChild(new Text(body, 1, 0));
+		let optionIndex = 0;
+		let cachedLines: string[] | undefined;
+		let cachedWidth = -1;
 
-		const list = new SelectList(items, items.length, {
-			selectedPrefix: (text: string) => theme.fg("accent", text),
-			selectedText: (text: string) => theme.fg("accent", text),
-			description: (text: string) => theme.fg(critical ? "warning" : "muted", text),
-			scrollInfo: (text: string) => theme.fg("dim", text),
-			noMatch: (text: string) => theme.fg(color, text),
-		});
-		list.onSelect = (item: SelectItem) => done(item.value as "yes" | "no");
-		list.onCancel = () => done("no");
-		container.addChild(list);
-		container.addChild(new DynamicBorder((s: string) => theme.fg(color, s)));
+		const finish = (value: "yes" | "no") => done(value);
+		const refresh = () => {
+			cachedLines = undefined;
+			tui.requestRender();
+		};
+
+		function render(width: number): string[] {
+			if (cachedLines && cachedWidth === width) return cachedLines;
+
+			const lines: string[] = [];
+			const add = (text: string) => lines.push(truncateToWidth(text, width));
+			const title = critical ? "Critical bash command" : "High-risk bash command";
+
+			add(theme.fg(color, "─".repeat(width)));
+			addWrapped(lines, theme.fg(color, ` ${theme.bold(title)}`), width);
+			lines.push("");
+			addWrapped(
+				lines,
+				theme.fg("text", critical ? " This command may cause irreversible damage." : " This command was flagged as high risk."),
+				width,
+			);
+			lines.push("");
+			addWrapped(lines, theme.fg("muted", " Reasons:"), width);
+			for (const reason of risk.reasons) {
+				addWrapped(lines, theme.fg("muted", `- ${reason}`), width, " ");
+			}
+			lines.push("");
+			addWrapped(lines, theme.fg("muted", " Command:"), width);
+			addWrapped(lines, theme.fg("text", command), width, " ");
+			lines.push("");
+			addWrapped(lines, theme.fg("text", " Allow this command to run?"), width);
+			lines.push("");
+
+			for (let i = 0; i < items.length; i++) {
+				const item = items[i];
+				const selected = i === optionIndex;
+				const prefix = selected ? theme.fg("accent", "> ") : "  ";
+				const label = `${i + 1}. ${item.label}`;
+				const styled = selected ? theme.fg("accent", label) : theme.fg("text", label);
+				add(`${prefix}${styled}`);
+				addWrapped(lines, theme.fg("muted", item.description), width, "     ");
+			}
+
+			lines.push("");
+			add(theme.fg("dim", " ↑↓ navigate • Enter select • Esc cancel"));
+			add(theme.fg(color, "─".repeat(width)));
+			cachedLines = lines;
+			cachedWidth = width;
+			return lines;
+		}
 
 		return {
-			render: (width: number) => container.render(width),
-			invalidate: () => container.invalidate(),
+			render,
+			invalidate: () => {
+				cachedLines = undefined;
+			},
 			handleInput: (data: string) => {
-				list.handleInput(data);
-				tui.requestRender();
+				if (matchesKey(data, Key.up)) {
+					optionIndex = Math.max(0, optionIndex - 1);
+					refresh();
+					return;
+				}
+				if (matchesKey(data, Key.down)) {
+					optionIndex = Math.min(items.length - 1, optionIndex + 1);
+					refresh();
+					return;
+				}
+				if (matchesKey(data, Key.enter)) {
+					finish(items[optionIndex].value);
+					return;
+				}
+				if (matchesKey(data, Key.escape)) finish("no");
 			},
 		};
-	}, { overlay: true });
+	});
 
 	return choice ?? "no";
 }
@@ -590,6 +652,7 @@ async function waitForCriticalCountdown(
 	risk: Risk,
 ): Promise<"run" | "prompt"> {
 	if (!ctx.hasUI || ctx.mode !== "tui") return "run";
+	playQuestionNotificationSound(ctx);
 
 	return ctx.ui.custom<"run" | "prompt">((tui: any, theme: any, _kb: any, done: (value: "run" | "prompt") => void) => {
 		let remaining = CRITICAL_COUNTDOWN_SECONDS;
@@ -641,7 +704,7 @@ async function waitForCriticalCountdown(
 				if (countdownInterruptKeys.some((key) => matchesKey(data, key))) finish("prompt");
 			},
 		};
-	}, { overlay: true });
+	});
 }
 
 export default function bashGuard(pi: ExtensionAPI): void {
@@ -695,14 +758,16 @@ export default function bashGuard(pi: ExtensionAPI): void {
 			} else {
 				return {
 					block: true,
-					reason: "Blocked by bash-guard: critical Bash command requires interactive user approval, but no TUI is available.",
+					reason:
+					"Blocked by bash-guard: critical Bash command requires interactive user approval, but no TUI is available. Do not retry or work around this command; continue with the next safe step if possible, otherwise stop and explain that approval is required.",
 				};
 			}
 
 			return {
 				block: true,
+				terminate: true,
 				reason:
-					"The user selected No for this critical Bash command. The command was not executed; continue the current task without retrying it.",
+					"The user denied this critical Bash command. It was not executed; end the current turn without retrying or replacing it.",
 			};
 		}
 
@@ -711,7 +776,8 @@ export default function bashGuard(pi: ExtensionAPI): void {
 		if (!ctx.hasUI || ctx.mode !== "tui") {
 			return {
 				block: true,
-				reason: "Blocked by bash-guard: high-risk Bash command requires interactive user approval, but no TUI is available.",
+				reason:
+					"Blocked by bash-guard: high-risk Bash command requires interactive user approval, but no TUI is available. Do not retry or work around this command; continue with the next safe step if possible, otherwise stop and explain that approval is required.",
 			};
 		}
 
@@ -720,8 +786,9 @@ export default function bashGuard(pi: ExtensionAPI): void {
 
 		return {
 			block: true,
+			terminate: true,
 			reason:
-				"The user selected No for this high-risk Bash command. The command was not executed; treat this tool call as absent and continue the current task without retrying it.",
+				"The user denied this high-risk Bash command. It was not executed; end the current turn without retrying or replacing it.",
 		};
 	});
 }
