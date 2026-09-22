@@ -14,7 +14,6 @@ Invocation labels:
 | bash-guard    | User      | Guards high-risk commands with approval.                                                                             |
 | ask-question  | Model     | Asks one interactive clarification or preference question with text, single-select, or multi-select input.           |
 | claude-ctrl-c | Automatic | Mimics the Ctrl+C behaviour of Claude Code.                                                                          |
-| clear         | User      | Starts a new session.                                                                                                |
 | qwen-think    | User      | Prefixes main-session user prompts with the selected Qwen thinking tag.                                              |
 | subagents     | Both      | Runs single-purposed subagents with the model specified in the subagent's .md file, or the served llama.cpp model.   |
 | safe-bash     | Model     | Runs restricted read-only shell commands for worker subagents. Packaged with the `subagents` extension.              |
