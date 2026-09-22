@@ -19,6 +19,7 @@ const ARGUMENTS: Record<string, ThinkMode> = {
 	high: "high",
 	xhigh: "xhigh",
 };
+const MODE_ORDER: ThinkMode[] = ["off", "low", "medium", "high", "xhigh"];
 const DEFAULT_MODE: ThinkMode = "medium";
 
 function isSubagentProcess(): boolean {
@@ -87,13 +88,13 @@ export default function qwenThink(pi: ExtensionAPI): void {
 
 		return {
 			action: "transform",
-			text: `${TAGS[mode]}${event.text}`,
+			text: `${TAGS[mode]}\n${event.text}`,
 			images: event.images,
 		};
 	});
 
 	pi.registerCommand("qwen-think", {
-		description: "Set the Qwen thinking mode: low, med, high, or xhigh",
+		description: "Set the Qwen thinking mode: low, med, high, or xhigh. No argument cycles modes",
 		handler: async (args, ctx) => {
 			if (subagent) {
 				ctx.ui.notify("Thinking modes are disabled for subagents.", "info");
@@ -101,7 +102,9 @@ export default function qwenThink(pi: ExtensionAPI): void {
 			}
 
 			const argument = args.trim().toLowerCase();
-			const nextMode = argument === "" ? "off" : ARGUMENTS[argument];
+			const nextMode = argument === ""
+				? MODE_ORDER[(MODE_ORDER.indexOf(mode) + 1) % MODE_ORDER.length]
+				: ARGUMENTS[argument];
 			if (!nextMode) {
 				ctx.ui.notify("Usage: /qwen-think [low|med|high|xhigh]", "info");
 				return;
