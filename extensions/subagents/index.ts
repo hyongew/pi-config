@@ -12,7 +12,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getMarkdownTheme, parseFrontmatter, truncateHead, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
-import { Container, Markdown, Spacer, Text, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Key, Markdown, Spacer, Text, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -191,6 +191,7 @@ const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
 
 let agents: AgentConfig[] = [];
 const runs = new Map<string, AgentResult>();
+const liveResponseByProgress = new WeakMap<AgentProgress, string>();
 let spawningDisabled = false;
 
 function makeRunId(): string {
@@ -216,6 +217,55 @@ function summaryLines(): string[] {
 
 function updateWidget(ctx: ExtensionContext): void {
 	if (ctx.hasUI) ctx.ui.setWidget("subagents", summaryLines());
+}
+
+async function watchSubagent(ctx: ExtensionContext, run: AgentResult): Promise<void> {
+	await withUiLock(() =>
+		ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+			const refresh = setInterval(() => tui.requestRender(), 200);
+			return {
+				render(width: number) {
+					const progress = run.progress;
+					const response = (liveResponseByProgress.get(progress) || progress.lastMessage || "Waiting for the agent's first response…")
+						.split("\n")
+						.slice(-8);
+					const recentTools = progress.recentTools.slice(-4).map((event) =>
+						`  ${event.tool}${event.args ? `: ${event.args}` : ""}`,
+					);
+					const lines = [
+						theme.fg("accent", theme.bold(`${run.agent} (${run.id}) — ${progress.status}`)),
+						`Task: ${progress.task.replace(/\s+/g, " ").slice(0, 400)}`,
+						`Elapsed: ${formatDuration(progress.durationMs)} · ${progress.toolCount} tools · ${formatTokens(progress.tokens)} tokens`,
+						progress.currentTool
+							? `Working: ${progress.currentTool}${progress.currentToolArgs ? ` ${progress.currentToolArgs}` : ""}`
+							: "",
+						"",
+						theme.fg("accent", "Latest response"),
+						...response,
+						...(recentTools.length ? ["", theme.fg("accent", "Recent tools"), ...recentTools] : []),
+						progress.error ? `Error: ${progress.error}` : "",
+						"",
+						theme.fg(
+							"dim",
+							progress.status === "running"
+								? "Esc or Enter closes this view; the subagent keeps running."
+								: "Esc or Enter closes this view. Run /subagents again to open the completed session.",
+						),
+					].filter((line) => line !== "");
+					return lines.map((line) => truncateToWidth(line, width));
+				},
+				invalidate() {},
+				handleInput(data: string) {
+					if (matchesKey(data, Key.escape) || matchesKey(data, Key.enter) || data.toLowerCase() === "q") {
+						done();
+					}
+				},
+				dispose() {
+					clearInterval(refresh);
+				},
+			};
+		}),
+	);
 }
 
 export function registerAgent(config: AgentConfig): void {
@@ -620,6 +670,19 @@ async function runSubagent(
 					fireUpdate();
 				}
 
+				if (evt.type === "message_update") {
+					const messageEvent = evt.assistantMessageEvent;
+					if (messageEvent?.type === "text_start") {
+						liveResponseByProgress.set(progress, "");
+					} else if (messageEvent?.type === "text_delta" && typeof messageEvent.delta === "string") {
+						liveResponseByProgress.set(
+							progress,
+							`${liveResponseByProgress.get(progress) || ""}${messageEvent.delta}`.slice(-12000),
+						);
+					}
+					fireUpdate();
+				}
+
 				if (evt.type === "message_end" && evt.message) {
 					if (evt.message.role === "assistant") {
 						result.usage.turns++;
@@ -638,6 +701,7 @@ async function runSubagent(
 						const text = extractTextFromContent(evt.message.content);
 						if (text) {
 							result.output = text;
+							liveResponseByProgress.set(progress, text.slice(-12000));
 							// Extract just the prose "thinking" text — skip code blocks
 							const proseLines: string[] = [];
 							let inCodeBlock = false;
@@ -1006,8 +1070,12 @@ export default function (pi: ExtensionAPI) {
 			].filter(Boolean).join("\n");
 			ctx.ui.notify(detail, p.status === "failed" ? "error" : "info");
 
-			if (p.status === "running" || !selected.sessionPath) {
-				if (p.status === "running") ctx.ui.notify("This run is still active; follow-up input will be available when it completes.", "info");
+			if (p.status === "running") {
+				if (ctx.hasUI) await watchSubagent(ctx, selected);
+				else ctx.ui.notify("This run is still active.", "info");
+				return;
+			}
+			if (!selected.sessionPath) {
 				return;
 			}
 
@@ -1160,12 +1228,12 @@ export default function (pi: ExtensionAPI) {
 
 					// Update allResults with the completed result so the UI reflects it immediately
 					result.id = allResults[idx].id;
-					allResults[idx] = result;
-					runs.set(result.id!, result);
+					Object.assign(allResults[idx], result);
+					runs.set(allResults[idx].id!, allResults[idx]);
 					updateWidget(ctx);
 					flushParallelUpdate();
 
-					return result;
+					return allResults[idx];
 				});
 
 				// Build final output text
@@ -1207,8 +1275,8 @@ export default function (pi: ExtensionAPI) {
 						details: { mode: "single" as const, results: [liveResult] },
 					});
 				}, modelPattern(ctx.model), undefined, ctx.sessionManager.getSessionId());
-				result.id = liveResult.id;
-				runs.set(result.id!, result);
+				Object.assign(liveResult, result);
+				runs.set(liveResult.id!, liveResult);
 				updateWidget(ctx);
 
 				const isError = result.exitCode !== 0 || !!result.progress.error;
