@@ -68,6 +68,7 @@ interface Details {
 
 interface ExtensionConfig {
 	maxConcurrency?: number;
+	maxRunMinutes?: number;
 }
 
 const EXT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -77,6 +78,9 @@ const CONFIG_PATH = path.join(EXT_DIR, "config.json");
 const DEFAULT_MAX_CONCURRENCY = 3;
 const MAX_CONCURRENCY = 3;
 const SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_MAX_RUN_MINUTES = 15;
+const MAX_RUN_MINUTES = 240;
+let maxRunMs = DEFAULT_MAX_RUN_MINUTES * 60 * 1000;
 const PI_DIR = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
 const SESSION_DIR = path.join(PI_DIR, "sessions", "subagents");
 
@@ -506,7 +510,12 @@ async function buildPiArgs(
 	const unavailableNotice = unavailableTools.length > 0
 		? `\n\nThe following requested tools are unavailable in this session: ${unavailableTools.join(", ")}. Continue with the tools that are available; do not call unavailable tools.`
 		: "";
-	args.push("--append-system-prompt", `${childAgentInstructions(agent)}\n\n${agent.systemPrompt}${unavailableNotice}`);
+	const runtimeGuidance = [
+		"## Runtime budget",
+		`This run is forcibly stopped after ${Math.ceil(maxRunMs / 60000)} minutes, including time spent waiting for child agents.`,
+		"Prioritize the requested deliverable, avoid open-ended exploration, and return a useful partial result with completed work and blockers before the limit if the task will not fit.",
+	].join("\n");
+	args.push("--append-system-prompt", `${childAgentInstructions(agent)}\n\n${runtimeGuidance}\n\n${agent.systemPrompt}${unavailableNotice}`);
 
 	// Handle long tasks by writing to file
 	const TASK_LIMIT = 8000;
@@ -541,6 +550,29 @@ function extractToolArgsPreview(args: Record<string, unknown>): string {
 	if (args.pattern) return String(args.pattern);
 	const s = JSON.stringify(args);
 	return s.length > 80 ? s.slice(0, 80) + "…" : s;
+}
+
+function forceKillProcessTree(proc: ReturnType<typeof spawn>): void {
+	if (process.platform === "win32" && proc.pid) {
+		const killer = spawn("taskkill", ["/PID", String(proc.pid), "/T", "/F"], {
+			stdio: "ignore",
+			windowsHide: true,
+		});
+		killer.on("error", () => proc.kill("SIGKILL"));
+		return;
+	}
+	proc.kill("SIGKILL");
+}
+
+function terminateProcessTree(proc: ReturnType<typeof spawn>): void {
+	if (process.platform === "win32") {
+		forceKillProcessTree(proc);
+		return;
+	}
+	proc.kill("SIGTERM");
+	setTimeout(() => {
+		if (proc.exitCode === null && proc.signalCode === null) forceKillProcessTree(proc);
+	}, 3000);
 }
 
 async function runSubagent(
@@ -591,6 +623,7 @@ async function runSubagent(
 		let settled = false;
 		let waitingForNested = false;
 		let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+		let maxRunHandle: ReturnType<typeof setTimeout> | undefined;
 		let removeAbortListener = () => {};
 		const clearTimeoutHandle = () => {
 			if (timeoutHandle) clearTimeout(timeoutHandle);
@@ -603,16 +636,14 @@ async function runSubagent(
 				timedOut = true;
 				progress.error = `No progress received for ${SUBAGENT_TIMEOUT_MS / 60000} minutes`;
 				fireUpdate();
-				proc?.kill("SIGTERM");
-				setTimeout(() => {
-					if (proc && !proc.killed) proc.kill("SIGKILL");
-				}, 3000);
+				if (proc) terminateProcessTree(proc);
 			}, SUBAGENT_TIMEOUT_MS);
 		};
 		const finish = (code: number) => {
 			if (settled) return;
 			settled = true;
 			clearTimeoutHandle();
+			if (maxRunHandle) clearTimeout(maxRunHandle);
 			removeAbortListener();
 			resolve(code);
 		};
@@ -626,6 +657,12 @@ async function runSubagent(
 					Number(process.env.PI_SUBAGENT_DEPTH || "0") + 1,
 				),
 		});
+		maxRunHandle = setTimeout(() => {
+			timedOut = true;
+			progress.error = `Maximum run time exceeded (${Math.ceil(maxRunMs / 60000)} minutes)`;
+			fireUpdate();
+			if (proc) terminateProcessTree(proc);
+		}, maxRunMs);
 
 		let buf = "";
 		let stderrBuf = "";
@@ -754,8 +791,7 @@ async function runSubagent(
 
 		if (signal) {
 			const kill = () => {
-				proc?.kill("SIGTERM");
-				setTimeout(() => proc && !proc.killed && proc.kill("SIGKILL"), 3000);
+				if (proc) terminateProcessTree(proc);
 			};
 			if (signal.aborted) kill();
 			else {
@@ -774,7 +810,11 @@ async function runSubagent(
 	result.timedOut = timedOut;
 	progress.status = exitCode === 0 && !progress.error ? "completed" : "failed";
 	progress.durationMs = Date.now() - startTime;
-	if (progress.error) result.output = result.output || `Error: ${progress.error}`;
+	if (progress.error) {
+		result.output = result.output
+			? `${result.output}\n\n[Subagent stopped: ${progress.error}]`
+			: `Error: ${progress.error}`;
+	}
 
 	// Truncate output if very large
 	if (result.output.length > DEFAULT_MAX_BYTES) {
@@ -836,6 +876,9 @@ async function runWithFallback(
 		first = failedResult(agent, task, error);
 	}
 	if (first.exitCode === 0 && !first.progress.error) return first;
+	// A timed-out run may already have made partial workspace changes. Do not
+	// replay the same task automatically and risk extending the wait or duplicating edits.
+	if (first.timedOut) return first;
 	if (signal?.aborted) return first;
 
 	const firstError = first.progress.error || first.output || "unknown subagent failure";
@@ -1053,6 +1096,11 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	const config = loadConfig();
+	const requestedMaxRunMinutes = config.maxRunMinutes;
+	const maxRunMinutes = Number.isFinite(requestedMaxRunMinutes)
+		? Math.min(MAX_RUN_MINUTES, Math.max(1, Math.trunc(requestedMaxRunMinutes as number)))
+		: DEFAULT_MAX_RUN_MINUTES;
+	maxRunMs = maxRunMinutes * 60 * 1000;
 	const requestedConcurrency = config.maxConcurrency;
 	const maxConcurrency = Number.isFinite(requestedConcurrency)
 		? Math.min(MAX_CONCURRENCY, Math.max(1, Math.trunc(requestedConcurrency as number)))
@@ -1177,6 +1225,10 @@ export default function (pi: ExtensionAPI) {
 			"Use scout for read-only codebase exploration, researcher for web research, reviewer for read-only review, and worker for code changes when those agents are available.",
 			"For multiple independent subagent tasks, use parallel mode with tasks[] array",
 			"Subagents have NO context from the current conversation — include ALL necessary context in the task description",
+			"Delegate bounded tasks with one concrete deliverable and a clear scope; split broad or multi-stage goals into independent tasks instead of sending an open-ended assignment.",
+			`State a time budget below the ${Math.ceil(maxRunMs / 60000)}-minute hard cap and a stop condition in every task (normally budget 5-10 minutes). Ask for completed work, useful partial results, and blockers if the full task will not fit.`,
+			"For worker tasks, prefer small, coherent file creations and edits as work proceeds; ask the worker to leave a reviewable partial state and summarize complete versus unfinished files if time runs out.",
+			"Do not delegate work whose result you can get with a few direct tool calls, and do not wait for a subagent to solve unrelated follow-up work.",
 		],
 		parameters: Type.Object({
 			agent: Type.Optional(

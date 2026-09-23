@@ -1,3 +1,4 @@
 {
-  "maxConcurrency": 3
+  "maxConcurrency": 3,
+  "maxRunMinutes": 15
 }
