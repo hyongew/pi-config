@@ -154,7 +154,7 @@ function withUiLock<T>(fn: () => Promise<T>): Promise<T> {
 	return sharedUiLock.withLock(fn);
 }
 
-function playQuestionNotificationSound(ctx: ExtensionContext): void {
+function playBellSound(ctx: ExtensionContext): void {
 	if (ctx.mode === "tui") {
 		process.stdout.write("\u0007");
 	}
@@ -636,7 +636,7 @@ export default function askQuestion(pi: ExtensionAPI) {
 				if (signal?.aborted) {
 					return cancelledResult(params.question, mode, context);
 				}
-				playQuestionNotificationSound(ctx);
+				playBellSound(ctx);
 
 				if (mode === "text") {
 					const editorTitle = context ? `${params.question}\n\n${context}` : params.question;

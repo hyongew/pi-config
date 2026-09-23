@@ -538,7 +538,7 @@ function withUiLock<T>(fn: () => Promise<T>): Promise<T> {
 	return sharedUiLock.withLock(fn);
 }
 
-function playQuestionNotificationSound(ctx: ExtensionContext): void {
+function playBellSound(ctx: ExtensionContext): void {
 	if (ctx.mode === "tui") {
 		process.stdout.write("\u0007");
 	}
@@ -560,7 +560,7 @@ async function promptRisk(ctx: ExtensionContext, command: string, risk: Risk): P
 		{ value: "no" as const, label: "No", description: "Skip the command and continue" },
 	];
 
-	playQuestionNotificationSound(ctx);
+	playBellSound(ctx);
 	const choice = await ctx.ui.custom<"yes" | "no">((tui: any, theme: any, _kb: any, done: (value: "yes" | "no") => void) => {
 		const color = critical ? "error" : "warning";
 		let optionIndex = 0;
@@ -652,7 +652,7 @@ async function waitForCriticalCountdown(
 	risk: Risk,
 ): Promise<"run" | "prompt"> {
 	if (!ctx.hasUI || ctx.mode !== "tui") return "run";
-	playQuestionNotificationSound(ctx);
+	playBellSound(ctx);
 
 	return ctx.ui.custom<"run" | "prompt">((tui: any, theme: any, _kb: any, done: (value: "run" | "prompt") => void) => {
 		let remaining = CRITICAL_COUNTDOWN_SECONDS;
