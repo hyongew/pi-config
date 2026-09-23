@@ -1026,6 +1026,32 @@ function renderAgentProgress(
 // ── Extension ─────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
+	let enabled = true;
+
+	function updateEnabledStatus(ctx: ExtensionContext): void {
+		ctx.ui.setStatus(
+			"subagents",
+			enabled
+				? ctx.ui.theme.fg("muted", "🤖 subagents")
+				: undefined,
+		);
+	}
+
+	function setEnabled(on: boolean, ctx: ExtensionContext): void {
+		const active = new Set(pi.getActiveTools());
+		const wasActive = active.has("subagent");
+		if (on) active.add("subagent");
+		else active.delete("subagent");
+		if (wasActive !== on) pi.setActiveTools(Array.from(active));
+		enabled = on;
+		updateEnabledStatus(ctx);
+	}
+
+	pi.on("session_start", (_event, ctx) => {
+		if (!enabled) setEnabled(false, ctx);
+		else updateEnabledStatus(ctx);
+	});
+
 	const config = loadConfig();
 	const requestedConcurrency = config.maxConcurrency;
 	const maxConcurrency = Number.isFinite(requestedConcurrency)
@@ -1038,8 +1064,24 @@ export default function (pi: ExtensionAPI) {
 	const agentName = agentNameSchema(availableAgents, agentFieldDescription);
 
 	pi.registerCommand("subagents", {
-		description: "List, inspect, and continue subagent runs",
-		handler: async (_args, ctx) => {
+		description: "Enable or disable subagents; list, inspect, and continue runs",
+		handler: async (args, ctx) => {
+			const command = (args || "").trim().toLowerCase();
+			if (command === "on" || command === "off") {
+				const on = command === "on";
+				setEnabled(on, ctx);
+				ctx.ui.notify(`Subagents ${on ? "enabled" : "disabled"}.`, "info");
+				return;
+			}
+			if (command) {
+				ctx.ui.notify("Usage: /subagents [on|off]", "info");
+				return;
+			}
+			if (!enabled) {
+				ctx.ui.notify("Subagents are disabled. Run `/subagents on` to enable them.", "info");
+				return;
+			}
+
 			const values = [...runs.values()];
 			if (values.length === 0) {
 				ctx.ui.notify("No subagents have been spawned in this session.", "info");

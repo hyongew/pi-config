@@ -121,7 +121,7 @@ export default function qwenThink(pi: ExtensionAPI): void {
 			mode = nextMode;
 			pi.appendEntry(STATE_ENTRY, { mode });
 			updateStatus(ctx, mode);
-			ctx.ui.notify(`think mode set to ${mode}`, "info");
+			ctx.ui.notify(`Think mode set to ${mode}`, "info");
 		},
 	});
 }
