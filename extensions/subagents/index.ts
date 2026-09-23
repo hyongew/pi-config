@@ -67,6 +67,7 @@ interface Details {
 // ── Config ─────────────────────────────────────────────────────────────
 
 interface ExtensionConfig {
+	enabled?: boolean;
 	maxConcurrency?: number;
 	maxRunMinutes?: number;
 }
@@ -117,10 +118,17 @@ function withUiLock<T>(fn: () => Promise<T>): Promise<T> {
 function loadConfig(): ExtensionConfig {
 	try {
 		if (fs.existsSync(CONFIG_PATH)) {
-			return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as ExtensionConfig;
+			const config = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8"));
+			return config && typeof config === "object" ? config as ExtensionConfig : {};
 		}
 	} catch {}
 	return {};
+}
+
+function saveEnabledPreference(enabled: boolean): void {
+	const config = loadConfig();
+	config.enabled = enabled;
+	fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
 }
 
 // Built-in tools that pi provides natively (no extension needed)
@@ -1069,7 +1077,8 @@ function renderAgentProgress(
 // ── Extension ─────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
-	let enabled = true;
+	const config = loadConfig();
+	let enabled = typeof config.enabled === "boolean" ? config.enabled : true;
 
 	function updateEnabledStatus(ctx: ExtensionContext): void {
 		ctx.ui.setStatus(
@@ -1080,7 +1089,8 @@ export default function (pi: ExtensionAPI) {
 		);
 	}
 
-	function setEnabled(on: boolean, ctx: ExtensionContext): void {
+	function setEnabled(on: boolean, ctx: ExtensionContext, persist = false): void {
+		if (persist) saveEnabledPreference(on);
 		const active = new Set(pi.getActiveTools());
 		const wasActive = active.has("subagent");
 		if (on) active.add("subagent");
@@ -1091,11 +1101,9 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", (_event, ctx) => {
-		if (!enabled) setEnabled(false, ctx);
-		else updateEnabledStatus(ctx);
+		setEnabled(enabled, ctx);
 	});
 
-	const config = loadConfig();
 	const requestedMaxRunMinutes = config.maxRunMinutes;
 	const maxRunMinutes = Number.isFinite(requestedMaxRunMinutes)
 		? Math.min(MAX_RUN_MINUTES, Math.max(1, Math.trunc(requestedMaxRunMinutes as number)))
@@ -1117,7 +1125,7 @@ export default function (pi: ExtensionAPI) {
 			const command = (args || "").trim().toLowerCase();
 			if (command === "on" || command === "off") {
 				const on = command === "on";
-				setEnabled(on, ctx);
+				setEnabled(on, ctx, true);
 				ctx.ui.notify(`Subagents ${on ? "enabled" : "disabled"}.`, "info");
 				return;
 			}
