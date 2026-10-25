@@ -30,7 +30,7 @@ SKILL_DIR/.venv/Scripts/python.exe -m pip install -r SKILL_DIR/requirements.txt
 Run scripts with `SKILL_DIR/.venv/bin/python` on macOS/Linux or
 `SKILL_DIR/.venv/Scripts/python.exe` on Windows.
 
-## Tools
+## Tools (in the `scripts/` directory)
 
 | Script                                                   | Use                                                                |
 |----------------------------------------------------------|--------------------------------------------------------------------|

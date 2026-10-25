@@ -652,7 +652,6 @@ async function waitForCriticalCountdown(
 	risk: Risk,
 ): Promise<"run" | "prompt"> {
 	if (!ctx.hasUI || ctx.mode !== "tui") return "run";
-	playBellSound(ctx);
 
 	return ctx.ui.custom<"run" | "prompt">((tui: any, theme: any, _kb: any, done: (value: "run" | "prompt") => void) => {
 		let remaining = CRITICAL_COUNTDOWN_SECONDS;

@@ -1,9 +1,10 @@
 {
-  "lastChangelogVersion": "0.87.1",
+  "lastChangelogVersion": "1.4.0",
   "theme": "dark",
   "packages": [
     "git:github.com/huggingface/pi-llama",
-    "npm:@sting8k/pi-vcc"
+    "npm:@sting8k/pi-vcc",
+    "npm:@juicesharp/rpiv-todo"
   ],
   "showHardwareCursor": false,
   "doubleEscapeAction": "tree",
