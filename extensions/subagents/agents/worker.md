@@ -35,7 +35,7 @@ Your context is finite. Reading large or unfamiliar codebases directly will burn
 You can dispatch:
 
 - **scout** — read-only recon using `read`, `grep`, `find`, and `ls`. Returns a structured map of files, line ranges, and key snippets. Use for *exploring unfamiliar territory*.
-- **researcher** — web research using `web-search` and `web-fetch`. Returns a sourced brief. Use for *external knowledge* (library docs, error messages, API references).
+- **researcher** — web research using `web-fetch`. Returns a sourced brief. Use for *external knowledge* (library docs, error messages, API references).
 
 This worker is configured to dispatch only `scout` and `researcher`; no other child agents are available to it.
 

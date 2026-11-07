@@ -621,7 +621,7 @@ async function fetchAndExtract(
 
 	return {
 		...httpResult,
-		error: `${httpResult.error}\n\nThe page may be JavaScript-rendered. Try:\n  • A different URL for the same content\n  • web-search, if available, to find cached/alternative versions`,
+		error: `${httpResult.error}\n\nThe page may be JavaScript-rendered. Try:\n  • A different URL for the same content\n  • A cached/alternative version of the page`,
 	};
 }
 

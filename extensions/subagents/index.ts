@@ -193,7 +193,6 @@ function buildChildEnv(
 // Custom tools that require loading an extension into the subagent process
 const EXT_BASE = path.dirname(EXT_DIR);
 const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
-	"web-search": path.join(EXT_BASE, "web-search.ts"),
 	"web-fetch": path.join(EXT_BASE, "web-fetch", "index.ts"),
 	"safe-bash": path.join(EXT_DIR, "tools", "safe-bash.ts"),
 	subagent: path.join(EXT_DIR, "index.ts"),
