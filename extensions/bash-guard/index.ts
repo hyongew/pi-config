@@ -1,7 +1,28 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { DynamicBorder, isToolCallEventType } from "@earendil-works/pi-coding-agent";
+import { DynamicBorder, getAgentDir, isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import { Container, Key, matchesKey, Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { parse as shellParse } from "shell-quote";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+const STATE_FILE = join(getAgentDir(), "extensions", "bash-guard", "config.json");
+
+function loadEnabledState(): boolean {
+	if (!existsSync(STATE_FILE)) return true;
+
+	try {
+		const data = JSON.parse(readFileSync(STATE_FILE, "utf8")) as { enabled?: unknown };
+		if (typeof data.enabled === "boolean") return data.enabled;
+	} catch {
+		// Missing or corrupt state file: default to enabled.
+	}
+	return true;
+}
+
+function saveEnabledState(enabled: boolean): void {
+	mkdirSync(dirname(STATE_FILE), { recursive: true });
+	writeFileSync(STATE_FILE, `${JSON.stringify({ enabled }, null, 2)}\n`, "utf-8");
+}
 
 type Severity = "catastrophic" | "high" | "medium";
 
@@ -707,7 +728,7 @@ async function waitForCriticalCountdown(
 }
 
 export default function bashGuard(pi: ExtensionAPI): void {
-	let enabled = true;
+	let enabled = loadEnabledState();
 
 	pi.on("session_start", (_event, ctx) => {
 		if (!ctx.hasUI || !enabled) return;
@@ -718,6 +739,13 @@ export default function bashGuard(pi: ExtensionAPI): void {
 		description: "Toggle high-risk Bash approvals and critical-command countdowns.",
 		handler: async (_args, ctx) => {
 			enabled = !enabled;
+			try {
+				saveEnabledState(enabled);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				ctx.ui.notify(`Unable to persist bash-guard state: ${message}`, "error");
+				return;
+			}
 			ctx.ui.setStatus(
 				"bash-guard",
 				enabled ?

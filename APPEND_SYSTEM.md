@@ -32,6 +32,7 @@
 
 - Use `python -B` when running any python scripts to prevent Python bytecode and `__pycache__` files from being created.
 - Do not download, clone, install, build, execute, or use external repositories, helper tools, agent frameworks, alternate coding tools, or automation frameworks unless they are directly required by the task, already declared as a project dependency, or explicitly named and authorized by the user.
+- Delete scripts and other temporary files that were created to accomplish the task, once they have fulfilled their purpose.
 
 ## Work quality and safety
 
