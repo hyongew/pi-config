@@ -9,6 +9,7 @@
   "showHardwareCursor": false,
   "doubleEscapeAction": "tree",
   "defaultThinkingLevel": "max",
+  "defaultTools": ["-subagent"],
   "defaultProvider": "llama-cpp",
   "images": {
     "autoResize": false
