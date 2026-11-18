@@ -731,8 +731,12 @@ export default function bashGuard(pi: ExtensionAPI): void {
 	let enabled = loadEnabledState();
 
 	pi.on("session_start", (_event, ctx) => {
-		if (!ctx.hasUI || !enabled) return;
-		ctx.ui.setStatus("bash-guard", ctx.ui.theme.fg("accent", "🛡️ bash-guard"));
+		if (!ctx.hasUI) return;
+		if (enabled) {
+			ctx.ui.setStatus("bash-guard", ctx.ui.theme.fg("accent", "🛡️ bash-guard"));
+		} else {
+			ctx.ui.setStatus("bash-guard", ctx.ui.theme.fg("error", "❗ bash-guard OFF"));
+		}
 	});
 
 	pi.registerCommand("bash-guard", {
