@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "1.5.0",
+  "lastChangelogVersion": "1.5.2",
   "theme": "dark",
   "packages": [
     "git:github.com/huggingface/pi-llama",
@@ -9,7 +9,9 @@
   "showHardwareCursor": false,
   "doubleEscapeAction": "tree",
   "defaultThinkingLevel": "max",
-  "defaultTools": ["-subagent"],
+  "defaultTools": [
+    "-subagent"
+  ],
   "defaultProvider": "llama-cpp",
   "images": {
     "autoResize": false

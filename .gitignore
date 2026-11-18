@@ -22,4 +22,3 @@
 
 # Browser state contains cookies, local storage, and other machine-local data.
 extensions/browser/.profile/
-extensions/qwen-think/config.json
